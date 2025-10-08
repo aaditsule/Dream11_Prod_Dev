@@ -40,6 +40,7 @@ class FeaturePipeline:
                 match_data = json.load(f)
 
             match_id = os.path.splitext(os.path.basename(match_file))[0]
+            match_date = match_data['info']['dates'][0]
             
             fp_calculator = FantasyPointsCalculator(match_data)
             current_match_points = fp_calculator.calculate_points()
@@ -63,6 +64,7 @@ class FeaturePipeline:
 
                 all_match_data.append({
                     'match_id': match_id,
+                    'match_date': match_date,
                     'player_id': player_id,
                     'player_name': role_info['name'],
                     'role': role_info['role'],
@@ -78,7 +80,10 @@ class FeaturePipeline:
             ])
             self.historical_stats = pd.concat([self.historical_stats, current_match_df], ignore_index=True)
             
-        return pd.DataFrame(all_match_data)
+        final_df = pd.DataFrame(all_match_data)
+        final_df.drop_duplicates(subset=['match_id', 'player_id'], keep='last', inplace=True)
+
+        return final_df
 
 # --- Run the pipeline ---
 if __name__ == '__main__':
