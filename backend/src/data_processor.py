@@ -10,7 +10,7 @@ class PlayerDataProcessor:
         try:
             self.seasonal_roles_df = pd.read_csv(seasonal_roles_path)
             self.global_roles_df = pd.read_csv(global_roles_path).set_index('player_id')
-            print("Successfully loaded player role CSV files.")
+            print("Successfully loaded player role CSV files")
         except FileNotFoundError as e:
             print(f"Error loading CSV files: {e}")
             self.seasonal_roles_df = pd.DataFrame()
@@ -26,13 +26,14 @@ class PlayerDataProcessor:
         season = datetime.strptime(match_date, '%Y-%m-%d').year
         
         # 1. Try to find seasonal role
-        seasonal_role = self.seasonal_roles_df[
-            (self.seasonal_roles_df['player_id'] == player_id) & 
-            (self.seasonal_roles_df['season'] == season)
-        ]
+        if not self.seasonal_roles_df.empty:
+            seasonal_role = self.seasonal_roles_df[
+                (self.seasonal_roles_df['player_id'] == player_id) & 
+                (self.seasonal_roles_df['season'] == season)
+            ]
         
-        if not seasonal_role.empty:
-            return seasonal_role.iloc[0]['role']
+            if not seasonal_role.empty:
+                return seasonal_role.iloc[0]['role']
             
         # 2. Fallback to global role
         try:
