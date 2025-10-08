@@ -35,13 +35,21 @@ function App() {
             });
             setTeamData(response.data);
         } catch (err) {
-            setError(err.response?.data?.detail || 'An error occurred. Please try again.');
+            if (err.response) {
+                // The request was made and the server responded with a status code that falls out of the range of 2xx
+                setError(err.response.data.detail || 'An error occurred on the server.');
+            } else if (err.request) {
+                // The request was made but no response was received
+                setError('Could not connect to the server. Please check your connection.');
+            } else {
+                // Something happened in setting up the request that triggered an Error
+                setError('An unexpected error occurred.');
+            }
         } finally {
             setIsLoading(false);
         }
     };
     
-    // This is the component with the fix
     const RationaleModal = ({ player, onClose }) => {
         const rationale = player.rationale || {};
         const sortedFeatures = Object.entries(rationale).sort(([,a],[,b]) => Math.abs(b || 0) - Math.abs(a || 0));
@@ -110,7 +118,8 @@ function App() {
                         </div>
                         <div className="summary-item">
                             <span>Credits Used</span>
-                            <strong>{(teamData.summary.total_credits_used || 0).toFixed(2)} / 100</strong>
+                            {/* <strong>{(teamData.summary.total_credits_used || 0).toFixed(2)} / 100</strong> */}
+                            <strong>{(Math.round(teamData.summary.total_credits_used * 100) / 100).toFixed(2)} / 100</strong>
                         </div>
                         <h3>Role Count</h3>
                         {Object.entries(teamData.summary.role_counts).map(([role, count]) => (
