@@ -23,10 +23,19 @@ class TeamSelector:
         # 2. Define decision variables: A binary variable for each player
         player_vars = LpVariable.dicts("Player", self.player_ids, cat=LpBinary)
 
+        # --- Pre-computation for Tie-Breakers ---
+        is_ar = {p_id: 1 if self.players_df.loc[p_id, 'role'] == 'AR' else 0 for p_id in self.player_ids}
+        
+        # Create lexicographical rank
+        sorted_ids = sorted(self.player_ids)
+        lex_rank = {p_id: i for i, p_id in enumerate(sorted_ids)}
+
         # 3. Define the objective function
         prob += lpSum(
-            self.players_df.loc[p_id, 'predicted_fp'] * player_vars[p_id] - 
-            0.001 * self.players_df.loc[p_id, 'credits'] * player_vars[p_id]
+            (self.players_df.loc[p_id, 'predicted_fp'] * player_vars[p_id])
+            - 0.001 * (self.players_df.loc[p_id, 'credits'] * player_vars[p_id])
+            + 0.00001 * (is_ar[p_id] * player_vars[p_id])           # prefer more ARs on tie
+            + 0.0000001 * ( (len(self.player_ids) - lex_rank[p_id]) * player_vars[p_id] )  # deterministic tie-break
             for p_id in self.player_ids
         ), "TotalPredictedPoints"
 
