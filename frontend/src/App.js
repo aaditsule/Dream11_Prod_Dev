@@ -49,27 +49,53 @@ function App() {
             setIsLoading(false);
         }
     };
-    
+
+    // --- RATIONALE MODAL ---
     const RationaleModal = ({ player, onClose }) => {
         const rationale = player.rationale || {};
-        const sortedFeatures = Object.entries(rationale).sort(([,a],[,b]) => Math.abs(b || 0) - Math.abs(a || 0));
-    
+
+        // Sort features by the absolute magnitude of their impact
+        const sortedFeatures = Object.entries(rationale).sort(([, a], [, b]) => Math.abs(b || 0) - Math.abs(a || 0));
+
+        // Find the maximum absolute value for better bar scaling
+        const maxAbsValue = Math.max(...sortedFeatures.map(([, v]) => Math.abs(v || 0)));
+
+        // Helper to make feature names readable
+        const formatFeatureName = (name) => {
+            return name
+                .replace('role_', 'Role ')
+                .replace('avg_fp_', 'Avg FP ')
+                .replace('_', ' ')
+                .replace(/\b\w/g, l => l.toUpperCase()); // Capitalize each word
+        };
+
         return (
             <div className="modal-backdrop" onClick={onClose}>
                 <div className="modal-content" onClick={e => e.stopPropagation()}>
                     <h3>Rationale for {player.name}</h3>
                     <p>Predicted Points: {(player.predicted_fp || 0).toFixed(2)}</p>
-                    <ul>
-                        {sortedFeatures.map(([feature, value]) => (
-                            <li key={feature} className={(value || 0) > 0 ? 'positive' : 'negative'}>
-                                <strong>{feature.replace(/role_|avg_fp_/g, '').replace('_', ' ')}:</strong> 
-                                {/* Use (value || 0) to prevent calling .toFixed() on null */}
-                                <span>{(value || 0).toFixed(2)}</span>
-                                <div className="bar-container">
-                                    <div className="bar" style={{ width: `${Math.abs(value || 0) * 5}%`, background: (value || 0) > 0 ? '#4CAF50' : '#F44336' }}></div>
-                                </div>
-                            </li>
-                        ))}
+                    <ul className="rationale-list">
+                        {sortedFeatures.map(([feature, value]) => {
+                            const val = value || 0;
+                            const width = Math.abs(val) < 5 ? (Math.abs(val) / 5) * 100 : (Math.abs(val) / maxAbsValue) * 100;
+                            const isBarFeature = !['avg_fp_last_5', 'matches_played'].includes(feature);
+                            return (
+                                <li key={feature} className={val >= 0 ? 'positive' : 'negative'}>
+                                    <span className="feature-name">{formatFeatureName(feature)}</span>
+                                    {isBarFeature ? (
+                                        <>
+                                            <div className="bar-container">
+                                                <div className="bar" style={{ width: `${width}%`, backgroundColor: val >= 0 ? '#4CAF50' : '#F44336' }}></div>
+                                            </div>
+                                            <span className="feature-value">{val.toFixed(2)}</span>
+                                        </>
+                                    ) : (
+                                        // Render only the value for specified features
+                                        <span className="feature-value-no-bar">{val.toFixed(2)}</span>
+                                    )}
+                                </li>
+                            );
+                        })}
                     </ul>
                     <button onClick={onClose}>Close</button>
                 </div>
@@ -93,7 +119,7 @@ function App() {
             </div>
 
             {error && <p className="error-message">{error}</p>}
-            
+
             {teamData && (
                 <div className="results-grid">
                     <div className="team-display">
@@ -118,15 +144,14 @@ function App() {
                         </div>
                         <div className="summary-item">
                             <span>Credits Used</span>
-                            {/* <strong>{(teamData.summary.total_credits_used || 0).toFixed(2)} / 100</strong> */}
-                            <strong>{(Math.round(teamData.summary.total_credits_used * 100) / 100).toFixed(2)} / 100</strong>
+                            <strong>{(teamData.summary.total_credits_used || 0).toFixed(2)} / 100</strong>
                         </div>
                         <h3>Role Count</h3>
-                        {Object.entries(teamData.summary.role_counts).map(([role, count]) => (
+                        {Object.entries(teamData.summary.role_counts || {}).map(([role, count]) => (
                              <div key={role} className="summary-item"><span>{role}</span><strong>{count}</strong></div>
                         ))}
                         <h3>Team Count</h3>
-                        {Object.entries(teamData.summary.team_counts).map(([team, count]) => (
+                        {Object.entries(teamData.summary.team_counts || {}).map(([team, count]) => (
                              <div key={team} className="summary-item"><span>{team}</span><strong>{count}</strong></div>
                         ))}
                     </div>

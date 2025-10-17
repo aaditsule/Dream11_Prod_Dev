@@ -134,7 +134,7 @@ button:hover:not(:disabled) {
     color: #34495e;
 }
 
-/* Rationale Modal Styles */
+/* --- RATIONALE MODAL STYLES --- */
 .modal-backdrop {
     position: fixed;
     top: 0;
@@ -145,6 +145,7 @@ button:hover:not(:disabled) {
     display: flex;
     justify-content: center;
     align-items: center;
+    z-index: 1000;
 }
 
 .modal-content {
@@ -153,31 +154,57 @@ button:hover:not(:disabled) {
     border-radius: 8px;
     width: 90%;
     max-width: 500px;
+    box-shadow: 0 5px 15px rgba(0,0,0,0.3);
 }
 
-.modal-content ul {
+.modal-content .rationale-list {
     list-style: none;
     padding: 0;
+    margin-top: 1rem;
 }
 
-.modal-content li {
+.modal-content .rationale-list li {
     display: flex;
-    justify-content: space-between;
     align-items: center;
-    margin-bottom: 0.5rem;
+    margin-bottom: 0.75rem;
+    font-size: 0.9rem;
+}
+
+.feature-name {
+    width: 35%;
+    font-weight: 500;
+    text-align: right;
+    padding-right: 10px;
+    color: #555;
 }
 
 .bar-container {
-    width: 60%;
+    width: 50%;
     height: 15px;
-    background-color: #eee;
+    background-color: #e0e0e0;
     border-radius: 3px;
 }
 
 .bar {
     height: 100%;
     border-radius: 3px;
+    transition: width 0.3s ease-in-out;
 }
 
-.positive { color: #4CAF50; }
-.negative { color: #F44336; }
+.feature-value {
+    width: 15%;
+    font-weight: bold;
+    text-align: left;
+    padding-left: 10px;
+}
+
+.positive .feature-value { color: #4CAF50; }
+.negative .feature-value { color: #F44336; }
+
+.feature-value-no-bar {
+    width: 65%; 
+    text-align: left;
+    padding-left: 10px;
+    font-weight: bold;
+    color: #34495e; /* A neutral color */
+}
