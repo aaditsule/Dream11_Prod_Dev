@@ -5,6 +5,7 @@ import json
 import numpy as np
 import shap
 import math
+import os
 
 # --- FastAPI Imports ---
 from fastapi import FastAPI, UploadFile, File, HTTPException
@@ -31,7 +32,7 @@ except FileNotFoundError:
     MODEL = None
 
 try:
-    HISTORICAL_DF = pd.read_csv('data/training_dataset.csv')
+    HISTORICAL_DF = pd.read_csv('data/training_dataset.csv', parse_dates=['match_date'])
     print("Historical dataset loaded successfully.")
 except FileNotFoundError:
     print("Error: training_dataset.csv not found.")
@@ -41,6 +42,9 @@ except FileNotFoundError:
 SEASONAL_ROLES_PATH = 'data/player_roles_by_season.csv'
 GLOBAL_ROLES_PATH = 'data/player_roles_global.csv'
 PLAYER_PROCESSOR = PlayerDataProcessor(SEASONAL_ROLES_PATH, GLOBAL_ROLES_PATH)
+
+# --- Initialize Credit Calculator ---
+CREDIT_CALCULATOR = CreditsCalculator(HISTORICAL_DF, PLAYER_PROCESSOR)
 
 # --- Create a SHAP explainer on startup ---
 explainer = shap.TreeExplainer(MODEL)
@@ -80,18 +84,21 @@ async def create_prediction(file: UploadFile = File(...)):
     if not MODEL or HISTORICAL_DF.empty:
         raise HTTPException(status_code=500, detail="Server is not ready. Assets not loaded.")
     if file.content_type != "application/json":
-        raise HTTPException(status_code=400, detail="Invalid file type. Please upload a JSON file.")
+        raise HTTPException(status_code=400, detail="Invalid file type. Please upload a valid JSON file.")
 
    # --- 1. Data Preparation ---
     test_match_data = json.loads(await file.read())
+    match_date = test_match_data['info']['dates'][0]
     teams = test_match_data['info']['teams']
     
     squads_with_roles = PLAYER_PROCESSOR.get_squads_with_roles(test_match_data)
     squad_df = pd.DataFrame.from_dict(squads_with_roles, orient='index').reset_index().rename(columns={'index': 'player_id'})
 
+    # --- 2. Feature Generation ---
+    pre_match_history = HISTORICAL_DF[HISTORICAL_DF['match_date'] < pd.to_datetime(match_date)]
     features_list = []
     for player_id in squad_df['player_id']:
-        player_history = HISTORICAL_DF[HISTORICAL_DF['player_id'] == player_id]
+        player_history = pre_match_history[pre_match_history['player_id'] == player_id]
         avg_fp_last_5 = player_history.tail(5)['actual_fp'].mean()
         matches_played = len(player_history)
         features_list.append({'player_id': player_id, 'avg_fp_last_5': avg_fp_last_5, 'matches_played': matches_played})
@@ -99,7 +106,7 @@ async def create_prediction(file: UploadFile = File(...)):
     features_df = pd.DataFrame(features_list)
     squad_df = pd.merge(squad_df, features_df, on='player_id')
     
-    # --- 2. Prediction and Credits ---
+    # --- 3. Prediction ---
     X_pred_pre_dummies = squad_df[['avg_fp_last_5', 'matches_played', 'role']]
     X_pred = pd.get_dummies(X_pred_pre_dummies, columns=['role'])
 
@@ -109,41 +116,45 @@ async def create_prediction(file: UploadFile = File(...)):
             
     squad_df['predicted_fp'] = MODEL.predict(X_pred[MODEL.feature_names_in_])
 
-    credit_calculator = CreditsCalculator(HISTORICAL_DF[['player_id', 'match_id', 'actual_fp']], HISTORICAL_DF[['player_id', 'role']])
-    credits_df = credit_calculator.get_credits_for_squad()
+    # --- 4. Credit Calculation ---
+    credits_df = CREDIT_CALCULATOR.get_credits_for_match(squad_df['player_id'].tolist(), match_date)
     squad_df = squad_df.join(credits_df, on='player_id')
-    
-    squad_df['credits'] = squad_df['credits'].fillna(6.0)
-    squad_df['team'] = squad_df['name'].apply(
-        lambda name: teams[0] if name in test_match_data['info']['players'][teams[0]] else teams[1]
-    )
+
+    squad_df['team'] = squad_df['name'].apply(lambda name: teams[0] if name in test_match_data['info']['players'][teams[0]] else teams[1])
     squad_df = squad_df.fillna(0.0)
 
-    # --- 3. Team Selection ---
-    selector = TeamSelector(squad_df[['player_id', 'name', 'predicted_fp', 'credits', 'role', 'team']])
+    # --- 5. Team Selection ---
+    selector = TeamSelector(squad_df)
     recommended_xi = selector.select_team()
     
     if recommended_xi.empty:
         raise HTTPException(status_code=422, detail="Could not find a valid team. The squad might not meet role/team constraints or the budget is too tight.")
 
-    # --- 4. Rationale Calculation ---
-    # a. Set player_id as the index for the main squad and prediction dataframes
-    squad_df.set_index('player_id', inplace=True)
-    X_pred.set_index(squad_df.index, inplace=True)
+    # --- 6. Rationale Calculation ---
+    # a. Set the index of the prediction features to align with the squad
+    X_pred.index = squad_df['player_id']
 
-    # b. Get SHAP values. The shap_df will have player_id as its index.
+    # b. Get SHAP values for the *entire* squad
     shap_values = explainer.shap_values(X_pred[MODEL.feature_names_in_])
-    shap_df = pd.DataFrame(shap_values, columns=MODEL.feature_names_in_, index=squad_df.index)
-
-    # c. Join the SHAP values. Both have player_id as the index.
-    xi_with_shap = recommended_xi.join(shap_df)
-
+    shap_df = pd.DataFrame(shap_values, columns=MODEL.feature_names_in_, index=X_pred.index)
+    
+    # c. Join the relevant SHAP values using a suffix to prevent column name conflicts
+    xi_with_shap = recommended_xi.join(shap_df, rsuffix='_shap')
+    print(xi_with_shap.columns)
+    print("SHAP values joined with recommended XI:", xi_with_shap)
+    
+    # def get_rationale(row):
+    #     return {feat: row[feat] for feat in MODEL.feature_names_in_}
+    
     def get_rationale(row):
-        return {feat: row[feat] for feat in MODEL.feature_names_in_}
+        # Use the suffixed columns to get the rationale values
+        shap_cols = [f"{col}" for col in MODEL.feature_names_in_]
+        # Create the dictionary with the original feature names as keys
+        return {original_col: row[shap_col] for original_col, shap_col in zip(MODEL.feature_names_in_, shap_cols)}
 
     xi_with_shap['rationale'] = xi_with_shap.apply(get_rationale, axis=1)
 
-    # --- 5. Final Formatting and Response ---
+    # --- 7. Final Formatting and Response ---
     final_xi_df = xi_with_shap.reset_index() # reset_index to get player_id as a column
     final_xi_df = final_xi_df[['name', 'role', 'team', 'credits', 'predicted_fp', 'rationale', 'player_id']]
     xi_records = final_xi_df.to_dict(orient='records')
