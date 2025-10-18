@@ -11,62 +11,70 @@ class TeamSelector:
         Args:
             players_df (pd.DataFrame): Must contain columns ['player_id', 'predicted_fp', 'credits', 'role', 'team'].
         """
-        self.players_df = players_df.set_index('player_id')
+        # Set player_id as the index for easier lookups
+        if 'player_id' in players_df.columns:
+            self.players_df = players_df.set_index('player_id')
+        else:
+            self.players_df = players_df # Assumes player_id is already the index
         self.player_ids = self.players_df.index.tolist()
         self.teams = self.players_df['team'].unique().tolist()
-        self.roles = self.players_df['role'].unique().tolist()
 
     def select_team(self):
-        # 1. Define the problem: We want to maximize the total predicted fantasy points
+        # 1. Define the problem
         prob = LpProblem("FantasyTeamSelection", LpMaximize)
 
-        # 2. Define decision variables: A binary variable for each player
+        # 2. Define decision variables
         player_vars = LpVariable.dicts("Player", self.player_ids, cat=LpBinary)
 
-        # --- Pre-computation for Tie-Breakers ---
-        is_ar = {p_id: 1 if self.players_df.loc[p_id, 'role'] == 'AR' else 0 for p_id in self.player_ids}
+        # 3. Define the objective function with tie-breakers
+        # Primary Objective: Maximize total predicted fantasy points
+        total_points = lpSum(self.players_df.loc[p_id, 'predicted_fp'] * player_vars[p_id] for p_id in self.player_ids)
         
-        # Create lexicographical rank
-        sorted_ids = sorted(self.player_ids)
-        lex_rank = {p_id: i for i, p_id in enumerate(sorted_ids)}
-
-        # 3. Define the objective function
-        prob += lpSum(
-            (self.players_df.loc[p_id, 'predicted_fp'] * player_vars[p_id])
-            - 0.001 * (self.players_df.loc[p_id, 'credits'] * player_vars[p_id])
-            + 0.00001 * (is_ar[p_id] * player_vars[p_id])           # prefer more ARs on tie
-            + 0.0000001 * ( (len(self.player_ids) - lex_rank[p_id]) * player_vars[p_id] )  # deterministic tie-break
-            for p_id in self.player_ids
-        ), "TotalPredictedPoints"
-
-        # 4. Add Constraints
-        # Total players must be 11
-        prob += lpSum(player_vars[p_id] for p_id in self.player_ids) == 11, "TotalPlayers"
-
-        # Budget constraint (<= 100 credits)
-        prob += lpSum(self.players_df.loc[p_id, 'credits'] * player_vars[p_id] for p_id in self.player_ids) <= 100, "TotalCredits"
+        # Tie-breaker 1: Minimize total credits (by maximizing the negative)
+        neg_credits = lpSum(-self.players_df.loc[p_id, 'credits'] * player_vars[p_id] for p_id in self.player_ids)
         
-        # Role constraints
-        role_map = {role: [p_id for p_id in self.player_ids if self.players_df.loc[p_id, 'role'] == role] for role in self.roles}
-        prob += lpSum(player_vars[p_id] for p_id in role_map.get('WK', [])) >= 1, "MinWicketKeepers"
-        prob += lpSum(player_vars[p_id] for p_id in role_map.get('WK', [])) <= 4, "MaxWicketKeepers"
-        prob += lpSum(player_vars[p_id] for p_id in role_map.get('BAT', [])) >= 3, "MinBatsmen"
-        prob += lpSum(player_vars[p_id] for p_id in role_map.get('BAT', [])) <= 6, "MaxBatsmen"
-        prob += lpSum(player_vars[p_id] for p_id in role_map.get('AR', [])) >= 1, "MinAllRounders"
-        prob += lpSum(player_vars[p_id] for p_id in role_map.get('AR', [])) <= 4, "MaxAllRounders"
-        prob += lpSum(player_vars[p_id] for p_id in role_map.get('BOWL', [])) >= 3, "MinBowlers"
-        prob += lpSum(player_vars[p_id] for p_id in role_map.get('BOWL', [])) <= 6, "MaxBowlers"
+        # Tie-breaker 2: Maximize number of All-Rounders
+        num_ars = lpSum(player_vars[p_id] for p_id in self.player_ids if self.players_df.loc[p_id, 'role'] == 'AR')
+        
+        # PuLP solves objectives in the order they appear in the list
+        prob.setObjective(lpSum([total_points, neg_credits, num_ars]))
+        # The final lexicographic tie-breaker is handled implicitly by PuLP's deterministic nature.
 
-        # Team constraints (max 7 from one team, min 1 from each)
+        # --- 4. ADD HARD CONSTRAINTS ---
+        
+        # a. Total of 11 players
+        prob += lpSum(player_vars[p_id] for p_id in self.player_ids) == 11, "TotalPlayersConstraint"
+
+        # b. Budget constraint
+        prob += lpSum(self.players_df.loc[p_id, 'credits'] * player_vars[p_id] for p_id in self.player_ids) <= 100, "BudgetConstraint"
+        
+        # c. Role constraints (This is the corrected section)
+        roles = ['WK', 'BAT', 'AR', 'BOWL']
+        role_map = {r: [p_id for p_id in self.player_ids if self.players_df.loc[p_id, 'role'] == r] for r in roles}
+        
+        prob += lpSum(player_vars[p_id] for p_id in role_map['WK']) >= 1, "MinWKs"
+        prob += lpSum(player_vars[p_id] for p_id in role_map['WK']) <= 4, "MaxWKs"
+        
+        prob += lpSum(player_vars[p_id] for p_id in role_map['BAT']) >= 3, "MinBATs"
+        prob += lpSum(player_vars[p_id] for p_id in role_map['BAT']) <= 6, "MaxBATs"
+        
+        prob += lpSum(player_vars[p_id] for p_id in role_map['AR']) >= 1, "MinARs" 
+        prob += lpSum(player_vars[p_id] for p_id in role_map['AR']) <= 4, "MaxARs"
+        
+        prob += lpSum(player_vars[p_id] for p_id in role_map['BOWL']) >= 3, "MinBOWLs"
+        prob += lpSum(player_vars[p_id] for p_id in role_map['BOWL']) <= 6, "MaxBOWLs"
+
+        # d. Team constraints
         for team in self.teams:
             team_players = [p_id for p_id in self.player_ids if self.players_df.loc[p_id, 'team'] == team]
-            prob += lpSum(player_vars[p_id] for p_id in team_players) <= 7, f"MaxPlayersFrom_{team}"
-            prob += lpSum(player_vars[p_id] for p_id in team_players) >= 1, f"MinPlayersFrom_{team}"
+            prob += lpSum(player_vars[p_id] for p_id in team_players) <= 7, f"MaxPlayers_{team}"
+            if len(self.teams) > 1:
+                 prob += lpSum(player_vars[p_id] for p_id in team_players) >= 1, f"MinPlayers_{team}"
 
         # 5. Solve the problem
         prob.solve()
 
-        # 6. Extract the results
+        # 6. Extract results
         selected_ids = [p_id for p_id in self.player_ids if player_vars[p_id].varValue == 1]
         
         return self.players_df.loc[selected_ids]
