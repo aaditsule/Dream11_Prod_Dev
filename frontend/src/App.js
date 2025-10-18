@@ -125,7 +125,7 @@ function App() {
                     <div className="team-display">
                         <h2>Recommended XI</h2>
                         <div className="player-cards-container">
-                            {teamData.recommended_xi.map((player) => (
+                            {teamData.recommended_xi.sort((a, b) => b.predicted_fp - a.predicted_fp).map((player) => (
                                 <div key={player.player_id} className="player-card">
                                     <h4>{player.name}</h4>
                                     <p>{player.role} | {player.team}</p>
@@ -147,9 +147,10 @@ function App() {
                             <strong>{(teamData.summary.total_credits_used || 0).toFixed(2)} / 100</strong>
                         </div>
                         <h3>Role Count</h3>
-                        {Object.entries(teamData.summary.role_counts || {}).map(([role, count]) => (
-                             <div key={role} className="summary-item"><span>{role}</span><strong>{count}</strong></div>
-                        ))}
+                            <div className="summary-item"><span>WK</span><strong>{teamData.summary.role_counts['WK'] || 0}</strong></div>
+                            <div className="summary-item"><span>BAT</span><strong>{teamData.summary.role_counts['BAT'] || 0}</strong></div>
+                            <div className="summary-item"><span>AR</span><strong>{teamData.summary.role_counts['AR'] || 0}</strong></div>
+                            <div className="summary-item"><span>BOWL</span><strong>{teamData.summary.role_counts['BOWL'] || 0}</strong></div>
                         <h3>Team Count</h3>
                         {Object.entries(teamData.summary.team_counts || {}).map(([team, count]) => (
                              <div key={team} className="summary-item"><span>{team}</span><strong>{count}</strong></div>
